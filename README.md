@@ -64,8 +64,17 @@ The server listens on port `8080`. For detailed setup paths, supported operating
 Use Endee as the retrieval layer for question answering, chat assistants, copilots, and other RAG applications that need fast vector search with metadata-aware filtering.
 
 ### Agentic AI and AI Agent Memory
-
 Use Endee as the long-term memory and context retrieval layer for AI agents built with frameworks like LangChain, CrewAI, AutoGen, and LlamaIndex. Store and retrieve past observations, tool outputs, conversation history, and domain knowledge mid-execution with low-latency filtered vector search, so your autonomous agents get the right context without stalling their reasoning loop.
+
+---
+
+## 🌟 Featured Applications
+
+### [🎙️ Meeting Memory Agent](./meeting-memory-agent)
+A complete, AI-powered meeting intelligence system built on Endee. It uses **OpenRouter (Claude 3)** to answer questions about your indexed meeting transcripts and notes.
+- **Secure Integration**: Backend-only API key handling.
+- **RAG Powered**: High-performance retrieval augmented generation.
+- **Ready to Use**: Minimal setup for local deployment.
 
 ### Semantic Search
 

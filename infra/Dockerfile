@@ -28,17 +28,18 @@ COPY ./CMakeLists.txt /build_space/CMakeLists.txt
 COPY ./install.sh /build_space/install.sh
 
 # Run build script
-ARG BUILD_ARCH
+ARG BUILD_ARCH=x86_64
 ENV BUILD_ARCH=${BUILD_ARCH}
 ARG DEBUG=false
 ENV DEBUG=${DEBUG}
-RUN chmod +x ./install.sh && \
+RUN sed -i 's/\r$//' ./install.sh && \
+    chmod +x ./install.sh && \
     if [ "$DEBUG" = "true" ]; then \
-        ./install.sh --${BUILD_ARCH} --debug_all --skip-deps; \
+        ./install.sh --debug_all --avx2 --skip-deps; \
     else \
-        ./install.sh --${BUILD_ARCH} --release --skip-deps; \
+        ./install.sh --release --avx2 --skip-deps; \
     fi && \
-    cp ./build/ndd-${BUILD_ARCH} ./ndd-server
+    cp ./build/ndd ./ndd-server
 
 # STAGE 2: RUNTIME
 FROM ${BASE_IMAGE}

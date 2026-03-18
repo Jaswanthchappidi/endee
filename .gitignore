@@ -30,3 +30,16 @@ frontend/*
 
 # DS Store
 .DS_Store
+
+# Environment variables
+# (Moved to local .gitignore files where needed)
+
+# Node.js
+node_modules/
+**/node_modules/
+
+# Local databases and logs
+*.json
+!package.json
+!package-lock.json
+*.log

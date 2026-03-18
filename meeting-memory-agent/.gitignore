@@ -1,0 +1,3 @@
+# Ignore environment variables in this folder
+node_modules/
+.env
