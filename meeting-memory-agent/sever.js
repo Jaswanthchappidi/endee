@@ -5,6 +5,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import natural from 'natural';
 import dotenv from 'dotenv';
+import msgpack from 'msgpack-lite';
+import fetch from 'node-fetch';
 
 // Load environment variables
 const __filename = fileURLToPath(import.meta.url);
@@ -14,25 +16,138 @@ dotenv.config({ path: path.join(__dirname, '.env') });
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Endee Configuration
+const ENDEE_URL = process.env.ENDEE_URL || 'http://localhost:8081/api/v1';
+const INDEX_NAME = 'meetings';
+
 // Middleware
 app.use(cors());
 app.use(express.json());
 app.use(express.static(__dirname));
 
+/**
+ * Endee Request Helper
+ */
+async function endeeRequest(path, method = 'GET', body = null) {
+  const url = `${ENDEE_URL}${path}`;
+  console.log(`📡 [Endee Req] ${method} ${path}`);
+  
+  try {
+    const options = {
+      method,
+      headers: { 
+        'Content-Type': 'application/json', // Using JSON for reliability
+        'Authorization': process.env.NDD_AUTH_TOKEN || ''
+      }
+    };
+    
+    if (body) {
+      options.body = JSON.stringify(body);
+      if (path.includes('search')) {
+        console.log(`📡 [Endee Search Detail] k=${body.k}, filter=${body.filter || 'none'}`);
+      }
+    }
+    
+    const res = await fetch(url, options);
+    const contentType = res.headers.get('content-type') || '';
+    const buffer = await res.arrayBuffer();
+    
+    if (buffer.byteLength === 0) {
+      return { success: res.ok };
+    }
+
+    let decoded;
+    const bodyStr = Buffer.from(buffer).toString();
+    if (contentType.includes('msgpack')) {
+      decoded = msgpack.decode(Buffer.from(buffer));
+    } else {
+      try {
+        decoded = JSON.parse(bodyStr);
+      } catch (e) {
+        // Fallback for plain text responses
+        decoded = { success: true, message: bodyStr };
+      }
+    }
+    
+    if (!res.ok) {
+      console.error(`❌ Endee Error (${res.status}):`, decoded);
+      return { error: decoded, status: res.status };
+    }
+    
+    return decoded;
+  } catch (e) {
+    console.error(`❌ Endee Connection Error:`, e.message);
+    return { error: e.message };
+  }
+}
+
+/**
+ * Improved Vector Generation (Pseudorandom distributed hashing)
+ */
+function generateVector(text) {
+  const dim = 1536;
+  const vector = new Array(dim).fill(0.1); // Base noise
+  const words = text.toLowerCase().match(/\w+/g) || [];
+  
+  if (words.length > 0) {
+    words.forEach((word) => {
+      // MurmurHash3-style hashing
+      let h = 0x811c9dc5;
+      for (let i = 0; i < word.length; i++) {
+        h = Math.imul(h ^ word.charCodeAt(i), 0x01000193);
+      }
+      
+      // Add "spikes" to the vector
+      for (let i = 0; i < 5; i++) {
+          h = Math.imul(h ^ (h >>> 16), 0x85ebca6b);
+          h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+          h ^= (h >>> 16);
+          // Proper modulo for negative hashes
+          const idx = ((h % dim) + dim) % dim;
+          vector[idx] += 10.0; // Stronger signal
+      }
+    });
+  }
+
+  // L2 Normalization
+  const mag = Math.sqrt(vector.reduce((s, v) => s + v * v, 0));
+  return vector.map(v => v / mag);
+}
+
 // Vector Processing Logic (Reused & Adapted)
 class MeetingManager {
   constructor() {
-    this.stemmer = natural.PorterStemmer;
-    this.tokenizer = new natural.WordTokenizer();
     this.dbPath = path.join(__dirname, 'meetings_db.json');
     this.load() || this.reset();
+    this.initIndex();
   }
 
-  reset() {
+  async initIndex() {
+    console.log(`🔍 Checking Endee index: ${INDEX_NAME}`);
+    const res = await endeeRequest(`/index/${INDEX_NAME}/info`);
+    
+    if (res?.status === 404 || res?.error?.status === 404) {
+        console.log(`🚀 Creating index: ${INDEX_NAME}`);
+        await endeeRequest(`/index/create`, 'POST', {
+            index_name: INDEX_NAME,
+            dim: 1536,
+            space_type: 'cosine',
+            precision: 'int16'
+        });
+    } else if (res && !res.error) {
+        console.log(`✅ Endee index ready: ${res.total_elements || 0} vectors`);
+    } else {
+        console.warn(`⚠️ Endee index status unclear:`, res?.error || 'Unknown error');
+    }
+  }
+
+  async reset() {
     this.meetings = [];
-    this.chunks = [];
-    this.vocab = [];
     this.save();
+    console.log(`🧹 Deleting entire Endee index: ${INDEX_NAME}`);
+    await endeeRequest(`/index/${INDEX_NAME}/delete`, 'DELETE');
+    // Manager will automatically re-init on next check or we can call it now
+    await this.initIndex();
   }
 
   load() {
@@ -40,8 +155,6 @@ class MeetingManager {
       if (fs.existsSync(this.dbPath)) {
         const data = JSON.parse(fs.readFileSync(this.dbPath, 'utf8'));
         this.meetings = data.meetings || [];
-        this.chunks = data.chunks || [];
-        this.vocab = data.vocab || [];
         return true;
       }
     } catch (e) { console.error('Error loading DB:', e); }
@@ -51,20 +164,12 @@ class MeetingManager {
   save() {
     try {
       fs.writeFileSync(this.dbPath, JSON.stringify({
-        meetings: this.meetings,
-        chunks: this.chunks,
-        vocab: this.vocab
+        meetings: this.meetings
       }, null, 2));
     } catch (e) { console.error('Error saving DB:', e); }
   }
 
-  tokenize(text) {
-    return this.tokenizer.tokenize(text.toLowerCase())
-      .filter(w => w.length > 2)
-      .map(w => this.stemmer.stem(w));
-  }
-
-  addMeeting(title, date, project, content) {
+  async addMeeting(title, date, project, content) {
     // 1. Chunking
     const sentences = content.match(/[^.!?\n]+[.!?\n]*/g) || [content];
     const meetingChunks = [];
@@ -80,49 +185,93 @@ class MeetingManager {
     }
     if (cur.trim()) meetingChunks.push(cur.trim());
 
-    // 2. Global Indexing
-    meetingChunks.forEach((text, i) => {
-      const tokens = this.tokenize(text);
-      this.chunks.push({
-        id: `${Date.now()}_${i}`,
-        meetingTitle: title,
-        date,
-        project,
-        text,
-        tokens
-      });
-    });
+    console.log(`🧠 Processing ${meetingChunks.length} chunks for "${title}"...`);
+
+    // 2. Vector Indexing in Endee
+    for (let i = 0; i < meetingChunks.length; i++) {
+        const text = meetingChunks[i];
+        const vector = generateVector(text);
+        
+        // Wrap object in array for batch-capable insert endpoint
+        await endeeRequest(`/index/${INDEX_NAME}/vector/insert`, 'POST', [{
+            id: `${Date.now()}_${i}`,
+            vector: vector,
+            meta: JSON.stringify({
+                meetingTitle: title,
+                date,
+                project,
+                text
+            })
+        }]);
+    }
 
     this.meetings.push({ title, date, project, chunkCount: meetingChunks.length });
     this.save();
     return meetingChunks.length;
   }
 
-  deleteMeeting(title) {
+  async deleteMeeting(title) {
     this.meetings = this.meetings.filter(m => m.title !== title);
-    this.chunks = this.chunks.filter(c => c.meetingTitle !== title);
     this.save();
+
+    const filter = [{
+        "meetingTitle": { "$eq": title }
+    }];
+
+    await endeeRequest(`/index/${INDEX_NAME}/vectors/delete`, 'DELETE', {
+        filter: filter 
+    });
   }
 
-  search(query, project = null, topK = 6) {
-    const qTokens = new Set(this.tokenize(query));
-    if (qTokens.size === 0) return [];
+  async search(query, project = null, topK = 6) {
+    const vector = generateVector(query);
+    console.log(`🔎 Searching for: "${query}" (Project: ${project || 'All'})`);
+    console.log(`🧠 Query Vector (1st 3): [${vector.slice(0, 3).join(', ')}]`);
 
-    let filteredChunks = this.chunks;
-    if (project) filteredChunks = filteredChunks.filter(c => c.project === project);
+    const searchParams = {
+        vector: vector,
+        k: topK, // Server expects 'k'
+        ef: 128  // CRITICAL: Search depth must be > 0 for HNSW
+    };
 
-    const scores = filteredChunks.map(chunk => {
-      let match = 0;
-      const cTokens = new Set(chunk.tokens);
-      qTokens.forEach(t => { if (cTokens.has(t)) match++; });
-      return { chunk, score: match / Math.sqrt(chunk.tokens.length || 1) };
+    if (project) {
+        searchParams.filter = JSON.stringify([{ "project": { "$eq": project } }]);
+    }
+
+    const results = await endeeRequest(`/index/${INDEX_NAME}/search`, 'POST', searchParams);
+    
+    // Log raw structure for debugging retrieval issues
+    console.log(`📊 Raw Results:`, JSON.stringify(results)?.substring(0, 500));
+    const resultList = results?.results || (Array.isArray(results) ? results : []);
+    console.log(`📊 Endee returned ${resultList.length} items`);
+
+    if (!resultList || resultList.length === 0) return [];
+
+    return resultList.map(r => {
+        if (!Array.isArray(r)) return { score: 0 };
+        
+        // Results are in array format: [score, id, meta, ...]
+        const score = r[0];
+        const rawMeta = r[2];
+        
+        // Handle metadata which might be a Buffer or String
+        let metaStr = '{}';
+        if (rawMeta) {
+            if (Buffer.isBuffer(rawMeta)) {
+                metaStr = rawMeta.toString();
+            } else if (typeof rawMeta === 'object' && rawMeta.type === 'Buffer') {
+                metaStr = Buffer.from(rawMeta.data).toString();
+            } else {
+                metaStr = String(rawMeta);
+            }
+        }
+        
+        const meta = JSON.parse(metaStr || '{}');
+        return {
+            ...meta,
+            score
+        };
     });
-
-    return scores
-      .sort((a, b) => b.score - a.score)
-      .slice(0, topK)
-      .filter(s => s.score > 0)
-      .map(s => s.chunk);
   }
 }
 
@@ -130,41 +279,49 @@ const manager = new MeetingManager();
 
 // Endpoints
 app.get('/api/meetings', (req, res) => {
-  res.json({ success: true, meetings: manager.meetings, totalChunks: manager.chunks.length });
+  res.json({ success: true, meetings: manager.meetings });
 });
 
-app.post('/api/index', (req, res) => {
+app.post('/api/index', async (req, res) => {
   const { title, date, project, content } = req.body;
   if (!title || !content) return res.status(400).json({ error: 'Title and content required' });
 
-  const count = manager.addMeeting(title, date, project || 'General', content);
-  res.json({ success: true, chunksIndex: count });
+  try {
+    const count = await manager.addMeeting(title, date, project || 'General', content);
+    res.json({ success: true, chunksIndex: count });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
-app.delete('/api/meetings/:title', (req, res) => {
+app.delete('/api/meetings/:title', async (req, res) => {
   const { title } = req.params;
-  manager.deleteMeeting(title);
-  res.json({ success: true });
+  try {
+    await manager.deleteMeeting(title);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.post('/api/query', async (req, res) => {
-  const { query, project, apiKey } = req.body;
+  const { query, project } = req.body;
   if (!query) return res.status(400).json({ error: 'Query required' });
 
-  const relevantChunks = manager.search(query, project);
-
-  if (relevantChunks.length === 0) {
-    return res.json({
-      answer: "I couldn't find any relevant information across your meeting notes. Try being more specific or adding more notes.",
-      sources: []
-    });
-  }
-
-  const context = relevantChunks.map(c =>
-    `[Meeting: "${c.meetingTitle}" | Date: ${c.date} | Project: ${c.project}]\n${c.text}`
-  ).join('\n\n---\n\n');
-
   try {
+    const relevantChunks = await manager.search(query, project);
+
+    if (relevantChunks.length === 0) {
+      return res.json({
+        answer: "I couldn't find any relevant information across your meeting notes. Try being more specific or adding more notes.",
+        sources: []
+      });
+    }
+
+    const context = relevantChunks.map(c =>
+      `[Meeting: "${c.meetingTitle}" | Date: ${c.date} | Project: ${c.project}]\n${c.text}`
+    ).join('\n\n---\n\n');
+
     const aiRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -212,7 +369,7 @@ app.post('/api/clear', (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`\n🚀 Meeting Memory Integrated Backend`);
+  console.log(`\n🚀 Meeting Memory with Endee Vector DB`);
   console.log(`📡 Serving UI at http://localhost:${PORT}`);
-  console.log(`📚 Meetings indexed: ${manager.meetings.length}\n`);
+  console.log(`📚 Meetings: ${manager.meetings.length}\n`);
 });
