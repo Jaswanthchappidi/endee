@@ -1,88 +1,161 @@
 # 🎙️ Meeting Memory Agent
 
-**Meeting Memory Agent** is an intelligent Retrieval-Augmented Generation (RAG) system designed to serve as a high-performance memory for your meetings. It allows you to index meeting transcripts, notes, and summaries, and then query them using natural language.
+An intelligent **Retrieval-Augmented Generation (RAG)** system that acts as a searchable memory for your meetings. It lets you **store, index, and query** meeting transcripts using natural language, returning **context-grounded answers**.
 
-Built on top of the **Endee Vector Database** architecture, this agent provides context-aware answers grounded in your specific meeting data.
+Built on the **Endee Vector Database architecture**, this project demonstrates a clean, practical implementation of semantic search + RAG.
+
+---
+
+## 🎥 Demo
+
+👉 [Watch Demo Video](YOUR_VIDEO_LINK_HERE)
+
+---
+
+## 🧠 System Flow (RAG Pipeline)
+
+```
+User Query → Embedding → Endee (Vector Store) → Similarity Retrieval → Context → LLM → Final Answer
+```
+
+### Step-by-step
+
+1. 📄 Upload meeting transcripts / notes
+2. ✂️ Chunk text into meaningful segments
+3. 🔢 Convert each chunk into embeddings
+4. 💾 Store embeddings in Endee-style vector storage (`meetings_db.json`)
+5. ❓ Convert user query into embedding
+6. 🔍 Retrieve top-k similar chunks (semantic search)
+7. 🤖 Generate answer using LLM with retrieved context
+
+---
+
+## ⚙️ Use of Endee (Core Requirement)
+
+This project uses **Endee Vector Database principles** for:
+
+* **Embedding Storage**: Stores vector representations of meeting chunks
+* **Similarity Search**: Retrieves relevant context using vector distance
+* **RAG Workflow**: Powers retrieval-augmented generation pipeline
+* **Local Indexing**: Fast and lightweight storage via `meetings_db.json`
+
+> Designed to be compatible with full Endee core for future scalability.
 
 ---
 
 ## ✨ Key Features
 
-- **Semantic Retrieval**: Powered by Endee-style vector retrieval patterns for finding the most relevant meeting segments.
-- **AI Intelligence**: Integrated with **OpenRouter** to use state-of-the-art models (like Claude 3 Haiku) for generating nuanced answers.
-- **Secure by Design**: A robust backend-only architecture ensures your API keys are never exposed to the client or user interface.
-- **Project-Specific Filtering**: Organize and search meetings by project or title.
-- **Real-time Progress**: Visual tracking of indexing and search confidence.
+* 🔍 **Semantic Search**: Finds the most relevant meeting segments (not keyword-based)
+* 🧠 **RAG Pipeline**: Combines retrieval + generation for accurate answers
+* 📁 **Project-based Filtering**: Organize meetings by title/project
+* 📊 **Confidence Signals**: Shows retrieval strength / relevance
+* 🔐 **Secure Backend**: API keys never exposed to frontend
+* ⚡ **Real-time Indexing**: Instant ingestion and querying
 
 ---
 
-## 🔒 Security & API Integration
+## 🚀 How to Use
 
-### OpenRouter API Key
-The system uses the **OpenRouter API** to communicate with LLM providers. To ensure maximum security:
-- **Backend-Only**: The API key is stored exclusively in a server-side `.env` file.
-- **No Client Exposure**: The frontend (UI) never handles or transmits the API key. All AI requests are proxied through your local Express.js backend.
-- **Git Protection**: The project includes a localized `.gitignore` that prevents your private API keys and local data from being committed to Git.
+1. **Upload Meetings** → Add transcripts or notes
+2. **Indexing** → System chunks + embeds + stores in Endee
+3. **Ask Questions** → e.g., *“What were the action items from the budget meeting?”*
+4. **View Sources** → See exact chunks used for answers
 
-### Endee Integration
-The project leverages the **Endee** ecosystem's high-performance indexing and search principles:
-- **Vectorized Search**: Follows the Endee RAG implementation pattern for semantic document understanding.
-- **Local Indexing**: Fast, local storage of meeting segments in `meetings_db.json`.
-- **Hybrid Search Potential**: Designed to integrate with the full Endee core server for even higher performance and scalability.
+---
+
+## 🛠️ Tech Stack
+
+* **Backend**: Node.js, Express
+* **LLM Access**: OpenRouter (Claude 3 Haiku or similar)
+* **Vector Storage**: Endee-style local vector DB
+* **Frontend**: HTML, JS (SPA)
+
+---
+
+## 🔒 Security
+
+* API key stored in `.env` (server-side only)
+* No client-side exposure
+* `.gitignore` prevents sensitive data leaks
+
+---
+
+## 🧩 Project Structure
+
+```
+meeting-memory-agent/
+│── index.html          # Frontend UI
+│── server.js           # Backend API (Express)
+│── meetings_db.json    # Vector storage (embeddings)
+│── .env                # Environment variables (ignored)
+│── .gitignore          # Protects sensitive files
+│── probe_endee.js      # Endee interaction/testing
+│── package.json        # Dependencies
+```
 
 ---
 
 ## 🛠️ Setup & Installation
 
 ### Prerequisites
-- **Node.js**: v18.0.0 or higher
-- **npm**: v9.0.0 or higher
 
-### 1. Initial Setup
-Clone the repository and install dependencies:
-```bash
+* Node.js (v18+)
+* npm (v9+)
+
+### 1. Install
+
+```
 cd meeting-memory-agent
 npm install
 ```
 
-### 2. Configure Environment Variables
-Create a `.env` file in the `meeting-memory-agent` directory:
-```env
-# Your private OpenRouter API key (Securely handled on backend)
-OPENROUTER_API_KEY=your_key_here
+### 2. Configure `.env`
 
-# Port for the local backend server
+```
+OPENROUTER_API_KEY=your_key_here
 PORT=3001
 ```
 
-### 3. Run the Application
-Start the integrated server:
-```bash
-node sever.js
+### 3. Run
+
 ```
-The server will be reachable at: `http://localhost:3001`
+npm start
+```
+
+👉 Open: [http://localhost:3001](http://localhost:3001)
 
 ---
 
-## 🚀 How to Use
+## 🎯 Example Queries
 
-1. **Upload Meetings**: Add your meeting transcripts or notes.
-2. **Indexing**: The system automatically segments and indexes the content using Endee's RAG patterns.
-3. **Ask Questions**: Type natural language questions like *"What were the action items from the budget meeting?"*
-4. **View Sources**: Click on the source tags to see exactly which part of the meeting the AI used for its answer.
-
----
-
-## 📁 Project Structure
-- `index.html`: The modern, single-page web interface.
-- `sever.js`: The high-performance Node.js backend.
-- `.env`: Your local, private configuration (ignored by Git).
-- `.gitignore`: Ensures your private data stays private.
-- `meetings_db.json`: Your local meeting index.
+* “What decisions were made in yesterday’s meeting?”
+* “List all action items from the sprint review”
+* “Who is responsible for deployment?”
 
 ---
 
-> [!IMPORTANT]
-> **Always ensure your `.env` file is excluded from Git.** This project includes a local `.gitignore` for this purpose, but verify your commit history if you've recently moved files.
+## 🚧 Future Improvements
 
-Powered by [Endee](https://github.com/endee-io/endee) 🚀
+* Hybrid search (keyword + vector)
+* Integration with full Endee core server
+* Better UI/UX and visualization
+* Multi-user support
+* Cloud deployment
+
+---
+
+## 📌 Important Notes
+
+* Ensure `.env` is not committed
+* Verify `.gitignore` is working
+* Keep dependencies updated
+
+---
+
+## 🏁 Conclusion
+
+This project demonstrates a **real-world AI system using Endee**, showcasing how vector databases enable **intelligent retrieval and contextual reasoning** over unstructured meeting data.
+
+---
+
+**⭐ Built with Endee | RAG | Semantic Search**
