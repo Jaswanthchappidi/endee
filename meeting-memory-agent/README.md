@@ -6,12 +6,6 @@ Built on the **Endee Vector Database architecture**, this project demonstrates a
 
 ---
 
-## 🎥 Demo
-
-👉 [Watch Demo Video](YOUR_VIDEO_LINK_HERE)
-
----
-
 ## 🧠 System Flow (RAG Pipeline)
 
 ```
